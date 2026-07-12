@@ -215,21 +215,34 @@
   .detail-head .close{background:rgba(255,255,255,.6);border:none;width:30px;height:30px;
     border-radius:50%;font-size:18px;cursor:pointer;color:var(--ink);line-height:1;align-self:center;}
   /* しまったときに再表示するタブ（画面下・スマホ向け） */
-  .back-list-tab{
+  /* 画面下の浮遊ボタンは重ならないよう縦に並べる */
+  .float-tabs{
     position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:1050;
+    display:flex;flex-direction:column;align-items:center;gap:8px;max-width:92vw;
+  }
+  .back-list-tab{
     background:var(--grape-deep);color:#fff;border:none;border-radius:22px;padding:12px 22px;
     font-family:'M PLUS Rounded 1c',sans-serif;font-size:13px;font-weight:700;cursor:pointer;
-    box-shadow:0 6px 18px rgba(155,123,224,.45);max-width:88vw;white-space:nowrap;
+    box-shadow:0 6px 18px rgba(155,123,224,.45);max-width:100%;white-space:nowrap;
   }
   .back-list-tab:hover{background:#7d5fc4;}
+  .lm-crumb{
+    padding:8px 16px;background:var(--grape);color:#4a3a6b;display:flex;align-items:center;gap:12px;
+    font-size:12.5px;font-weight:700;flex-wrap:wrap;
+  }
+  .crumb-back{
+    background:#fff;border:none;border-radius:14px;padding:5px 12px;font-size:11.5px;font-weight:700;
+    cursor:pointer;color:var(--grape-deep);font-family:'M PLUS Rounded 1c',sans-serif;white-space:nowrap;
+  }
+  .crumb-back:hover{background:var(--grape-deep);color:#fff;}
   .lm-group-table td{padding:10px 14px;}
   .lm-group-table tbody tr{cursor:pointer;}
   .lm-group-table tbody tr:hover{background:var(--lemon);}
   .peek-tab{
-    position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:1050;
     background:var(--berry);color:#fff;border:none;border-radius:22px;padding:12px 20px;
     font-family:'M PLUS Rounded 1c',sans-serif;font-size:13px;font-weight:700;cursor:pointer;
-    box-shadow:0 6px 18px rgba(240,86,139,.4);max-width:88vw;
+    box-shadow:0 6px 18px rgba(240,86,139,.4);max-width:100%;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
   }
   .peek-tab:hover{background:var(--berry-deep);}
   .detail-body{padding:16px 20px;overflow-y:auto;flex:1;}
@@ -435,7 +448,7 @@
     html, body{background:#fff !important; height:auto !important; overflow:visible !important;}
     /* 画面用の要素は完全に消す（残っていると空白ページが出る） */
     .app, .detail-panel, .overlay, .peek-tab, .back-list-tab, .sync-bar,
-    .setup-modal, .lm-close, .lm-btn, #lmSearch, .lm-filter, .lm-actions{ display:none !important; }
+    .setup-modal, .lm-close, .lm-btn, #lmSearch, .lm-filter, .lm-actions, .crumb-back, .float-tabs{ display:none !important; }
     .list-modal{
       position:static !important; display:block !important; background:#fff !important;
       height:auto !important; inset:auto !important; overflow:visible !important;
@@ -706,8 +719,10 @@
   </div>
 </div>
 
-<button class="peek-tab" id="peekTab" style="display:none;">📋 <span id="peekChiban"></span> の入力にもどる</button>
-<button class="back-list-tab" id="backToList" style="display:none;">↩️ 一覧にもどる</button>
+<div class="float-tabs">
+  <button class="peek-tab" id="peekTab" style="display:none;">📋 <span id="peekChiban"></span> の入力にもどる</button>
+  <button class="back-list-tab" id="backToList" style="display:none;">↩️ 一覧にもどる</button>
+</div>
 
 <!-- 登録筆の一覧（全画面） -->
 <div class="list-modal" id="listModal">
@@ -753,6 +768,7 @@
       <button class="lm-btn export" id="sheetExportBtn">📤 スプレッドシートにコピー</button>
     </div>
   </div>
+  <div class="lm-crumb" id="lmCrumb" style="display:none;"></div>
   <div class="lm-totals" id="lmTotals"></div>
   <div class="list-modal-body">
     <table class="lm-table" id="lmTable">
@@ -2228,6 +2244,8 @@ const LM_COLS = [
   {key:'note',     label:'メモ'}
 ];
 let lmSortKey = 'chiban';
+let lastListView = null;   // 一覧に戻るための状態
+let drillFrom = null;      // 集計から内訳へ降りているときの元グループ
 let lmSortAsc = true;
 
 // レコードを一覧用の行オブジェクトに整形
@@ -2320,6 +2338,27 @@ function renderLmTable(){
   const q = document.getElementById('lmSearch').value.trim().toLowerCase();
   const sf = document.getElementById('lmStatusFilter').value;
   let rows = Object.entries(managed).map(([fid,rec]) => lmRow(fid, rec));
+
+  // 集計から特定のグループに降りてきている場合は、その内訳だけに絞る
+  const crumb = document.getElementById('lmCrumb');
+  if(drillFrom){
+    rows = rows.filter(r => groupKeyOf(r, drillFrom.key) === drillFrom.group);
+    crumb.style.display = 'flex';
+    crumb.innerHTML =
+      `<span>📊 ${escapeHtml(GROUP_LABELS[drillFrom.key]||drillFrom.key)}：` +
+      `<b>${escapeHtml(drillFrom.group)}</b> の内訳</span>` +
+      `<button class="crumb-back" id="crumbBack">↩️ 集計にもどる</button>`;
+    document.getElementById('crumbBack').addEventListener('click', () => {
+      const k = drillFrom.key;
+      drillFrom = null;
+      document.getElementById('lmGroupBy').value = k;
+      renderLmTable();
+    });
+  } else {
+    crumb.style.display = 'none';
+    crumb.innerHTML = '';
+  }
+
   if(sf === 'alert'){
     rows = rows.filter(r => r.status === '要更新' || r.status === '期限切れ');
   } else if(sf !== 'all'){
@@ -2406,7 +2445,8 @@ function renderLmTable(){
       status: document.getElementById('lmStatusFilter').value,
       group:  document.getElementById('lmGroupBy').value,
       search: document.getElementById('lmSearch').value,
-      sortKey: lmSortKey, sortAsc: lmSortAsc
+      sortKey: lmSortKey, sortAsc: lmSortAsc,
+      drill: drillFrom ? {key: drillFrom.key, group: drillFrom.group} : null
     };
     closeListModal();
     openDetail(tr.dataset.fid);
@@ -2464,21 +2504,22 @@ function renderGroupTable(rows, key){
 
   // 集計行をクリックすると、その内訳（一覧）に切り替える
   gb.querySelectorAll('tr').forEach(tr => tr.addEventListener('click', () => {
+    // どの集計から降りてきたか覚えておき、「集計にもどる」を出す
+    drillFrom = { key: key, group: tr.dataset.group };
     document.getElementById('lmGroupBy').value = '';
-    document.getElementById('lmSearch').value = tr.dataset.group;
-    document.getElementById('lmSearchClear').style.display = 'flex';
     renderLmTable();
   }));
   document.getElementById('lmCount').textContent = names.length + 'グループ';
 }
 document.getElementById('lmStatusFilter').addEventListener('change', renderLmTable);
-document.getElementById('lmGroupBy').addEventListener('change', renderLmTable);
+document.getElementById('lmGroupBy').addEventListener('change', () => { drillFrom = null; renderLmTable(); });
 document.getElementById('printBtn').addEventListener('click', () => {
   window.print();
 });
 
 // 「表示をリセット」：絞り込み・集計・検索・並び順をすべて初期状態に戻す
 function resetListView(){
+  drillFrom = null;
   document.getElementById('lmStatusFilter').value = 'all';
   document.getElementById('lmGroupBy').value = '';
   document.getElementById('lmSearch').value = '';
@@ -2492,7 +2533,6 @@ document.getElementById('lmResetBtn').addEventListener('click', () => {
 });
 
 // ===== 一覧へ戻る（地図から絞り込み状態のまま戻れるように）=====
-let lastListView = null;
 function showBackToList(){
   const btn = document.getElementById('backToList');
   if(!btn || !lastListView) return;
@@ -2510,6 +2550,7 @@ document.getElementById('backToList').addEventListener('click', () => {
   document.getElementById('lmSearchClear').style.display = lastListView.search ? 'flex' : 'none';
   lmSortKey = lastListView.sortKey;
   lmSortAsc = lastListView.sortAsc;
+  drillFrom = lastListView.drill ? {key: lastListView.drill.key, group: lastListView.drill.group} : null;
   hideBackToList();
   closeDetail(true);
   document.getElementById('listModal').classList.add('open');
