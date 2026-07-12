@@ -516,7 +516,7 @@
 
     <div style="border-top:2px dotted var(--grape);margin:16px 0 12px;"></div>
     <div class="setup-head" style="border-radius:12px;margin-bottom:10px;">💾 バックアップ</div>
-    <p class="setup-note">台帳データはこの端末の中に保存されています。ブラウザのデータを消すと失われるので、ときどき書き出して保管してください。</p>
+    <p class="setup-note" id="bkNote"></p>
     <div class="setup-actions" style="flex-direction:column;gap:8px;">
       <button class="btn" id="bkExportBtn" style="background:var(--mint);color:#2f7d67;">⬇️ バックアップを書き出す</button>
       <label class="btn" id="bkImportLabel" style="background:var(--sky);color:#256ba8;text-align:center;cursor:pointer;">
@@ -1729,9 +1729,8 @@ function saveLocal(){
   }catch(e){
     // 保存に失敗（容量オーバーなど）── 黙って失うのが一番危険なので必ず知らせる
     setSyncStatus('⚠️ 保存できませんでした！バックアップを書き出してください', 'err');
-    alert('台帳を端末に保存できませんでした。\n\n' +
-          '端末の保存容量がいっぱいの可能性があります。\n' +
-          '（航空写真の取込画像が容量を圧迫している場合は、💫→「画像を削除」をお試しください）\n\n' +
+    alert('台帳をこの端末に保存できませんでした。\n\n' +
+          '端末の保存容量がいっぱいの可能性があります。\n\n' +
           '大切なデータを失わないため、いますぐ 💫 →「バックアップを書き出す」を実行してください。');
     return false;
   }
@@ -2032,7 +2031,26 @@ function openSetup(){
   document.getElementById('setupHint').textContent = '';
   document.getElementById('setupHint').className = 'setup-hint';
   document.getElementById('gasPwInput').value = GAS_PW;
+  updateBackupNote();
   setupModal.classList.add('open'); setupOverlay.classList.add('show');
+}
+
+// 接続状態によってバックアップの説明を変える（実態と食い違わないように）
+function updateBackupNote(){
+  const el = document.getElementById('bkNote');
+  if(!el) return;
+  if(GAS_URL){
+    el.innerHTML =
+      'データの本体は<b>Googleスプレッドシート</b>にあり、この端末には控えが入っています。' +
+      'ブラウザのデータを消しても、つなぎ直せば元に戻せます。<br>' +
+      'それでも、シートを誤って消したり書き換えたりしたときの備えとして、' +
+      'ときどき書き出して保管しておくと安心です。';
+  } else {
+    el.innerHTML =
+      '<b>データはこの端末の中だけに保存されています。</b>' +
+      'ブラウザのデータを消すと失われるので、ときどき書き出して保管してください。<br>' +
+      '（上のスプレッドシート連携をつなぐと、データがシート側にも保存され安全になります）';
+  }
 }
 function closeSetup(){ setupModal.classList.remove('open'); setupOverlay.classList.remove('show'); }
 document.getElementById('settingsBtn').addEventListener('click', openSetup);
