@@ -1355,7 +1355,8 @@ function openDetail(fid){
   g('fOwnerTel').value = rec ? (rec.ownerTel||'') : '';
   // 契約
   g('fDeal').value = rec ? (rec.deal||'借りている') : '借りている';
-  g('fKarite').value = rec ? (rec.karite||'株式会社プラウド') : '株式会社プラウド';
+  // 保存済みの値はそのまま使う（updateDealUIが区分に応じて既定値を補う）
+  g('fKarite').value = rec ? (rec.karite||'') : '';
   updateDealUI();
   g('fLaw').value = rec ? (rec.law||'') : '';
   g('fStart').value = rec ? (rec.start||'') : '';
@@ -1701,7 +1702,11 @@ let syncBusy = false;
 // 基本のステータス（接続状態）に戻すための保持
 let statusTimer = null;
 function baseStatus(){
-  if(GAS_URL) return {text:'同期OK ✓', kind:'ok'};
+  const n = Object.keys(pending || {}).length;
+  if(GAS_URL){
+    if(n > 0) return {text:`未送信の変更 ${n}件（次に開いたとき送信します）`, kind:'err'};
+    return {text:'同期OK ✓', kind:'ok'};
+  }
   return {text:'この端末に保存中（共有オフ・💫で設定）', kind:'warn'};
 }
 // transient=true の場合、数秒後に基本表示へ自動で戻す
@@ -1791,18 +1796,52 @@ async function fetchFromSheet(){
 async function pushToSheet(fid, rec, del){
   if(!GAS_URL){ saveLocal(); return; }
   setSyncStatus('保存中…', 'busy');
+  let sent = false;
   try{
     const body = JSON.stringify({action: del?'delete':'upsert', fid, record: rec||null, pw: GAS_PW});
     // GASはtext/plainにするとプリフライトを避けられる
     const res = await fetch(GAS_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body});
     const data = await res.json();
-    if(data && data.ok){ setSyncStatus('保存OK ✓', 'ok', true); }
+    if(data && data.ok){ sent = true; setSyncStatus('保存OK ✓', 'ok', true); }
     else if(data && data.error === 'auth'){ setSyncStatus('合言葉が違います（💫で確認）', 'err'); }
     else { setSyncStatus('保存失敗', 'err'); }
   }catch(e){
-    setSyncStatus('保存できません（控えのみ）', 'err');
+    setSyncStatus('保存できません（あとで自動再送します）', 'err');
   }
+  // 送信できなかった変更は覚えておき、次に開いたときに再送する。
+  // （これをしないと、シートの古い内容で上書きされて消えてしまう）
+  if(sent) clearPending(fid);
+  else     markPending(fid, del);
   saveLocal();
+}
+
+// ---- 未送信の変更（オフライン時など） ----
+let pending = {};   // { 筆ID: 'upsert' | 'delete' }
+function loadPending(){
+  try{ pending = JSON.parse(localStorage.getItem('pending-changes') || '{}'); }catch(e){ pending = {}; }
+}
+function savePending(){
+  try{ localStorage.setItem('pending-changes', JSON.stringify(pending)); }catch(e){}
+}
+function markPending(fid, del){ pending[fid] = del ? 'delete' : 'upsert'; savePending(); }
+function clearPending(fid){ delete pending[fid]; savePending(); }
+
+// 未送信の変更をスプレッドシートへ送る（シートを読み込む前に必ず実行する）
+async function flushPending(){
+  const fids = Object.keys(pending);
+  if(!GAS_URL || fids.length === 0) return;
+  setSyncStatus(`未送信の変更 ${fids.length}件 を送信中…`, 'busy');
+  for(const fid of fids){
+    const op = pending[fid];
+    const rec = managed[fid];
+    if(op === 'delete' || !rec){
+      await pushToSheet(fid, null, true);
+    } else {
+      await pushToSheet(fid, rec, false);
+    }
+  }
+  const left = Object.keys(pending).length;
+  if(left === 0) setSyncStatus('未送信の変更を送信しました ✓', 'ok', true);
 }
 
 async function persist(){
@@ -1881,6 +1920,9 @@ async function load(){
 
   // スプレッドシートから最新を取得して上書き
   if(GAS_URL){
+    loadPending();
+    // 先に未送信の変更を送る（送る前に読むと、その変更が消えてしまう）
+    await flushPending();
     const ok = await fetchFromSheet();
     if(ok){
       repairFromSource();   // シート経由の化けも修復
@@ -2112,6 +2154,7 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
   }
   hint.textContent = '読み込んでいます…';
   hint.className = 'setup-hint';
+  await flushPending();          // 未送信の変更を先に送る
   const ok = await fetchFromSheet();
   if(ok){
     document.getElementById('managedCount').textContent = Object.keys(managed).length;
