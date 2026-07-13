@@ -421,6 +421,7 @@
   .st-pill{
     display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap;
   }
+  .manual-mark{ display:inline-block;margin-left:4px;font-size:11px;cursor:help; }
   .lm-filter{
     padding:8px 12px;border:none;border-radius:18px;font-size:12px;font-weight:700;
     font-family:'M PLUS Rounded 1c',sans-serif;color:var(--ink);background:#fff;cursor:pointer;
@@ -755,6 +756,8 @@
       <select id="lmStatusFilter" class="lm-filter">
         <option value="all">すべての状態</option>
         <option value="alert">⚠️ 要更新＋期限切れ</option>
+        <option value="manual">✋ 手動で設定したものだけ</option>
+        <option value="auto">🤖 自動判定のものだけ</option>
         <option value="要更新">要更新</option>
         <option value="期限切れ">期限切れ</option>
         <option value="契約中">契約中</option>
@@ -771,6 +774,7 @@
         <option value="oazaGroup">大字ごとに集計</option>
         <option value="oazaKoaza">大字・小字ごとに集計</option>
         <option value="status">状態ごとに集計</option>
+        <option value="manualLabel">手動／自動 ごとに集計</option>
         <option value="usage">耕作の状況ごとに集計</option>
         <option value="law">適用法ごとに集計</option>
         <option value="right">権利の種類ごとに集計</option>
@@ -2046,7 +2050,7 @@ function renderList(){
     return `
     <div class="card-item" data-fid="${fid}">
       <div class="card-top">
-        <span class="st-pill" style="background:${stCol};color:${textOn(stCol)}">${escapeHtml(st)}</span>
+        <span class="st-pill" style="background:${stCol};color:${textOn(stCol)}">${escapeHtml(st)}</span>${rec.status?'<span class="manual-mark" title="手動設定">✋</span>':''}
         <span class="card-chiban">${escapeHtml(rec.chiban)}</span>
       </div>
       <div class="card-tags">
@@ -2270,6 +2274,9 @@ function lmRow(fid, rec){
   return {
     fid,
     status: statusOf(rec),
+    manual: !!rec.status,          // 手動でステータスを設定しているか
+    manualLabel: rec.status ? '✋ 手動設定' : '🤖 自動判定',
+    autoStatus: autoStatus(rec),   // 自動判定ならどうなるか
     usage: usageOf(rec),
     deal: rec.deal || '借りている',
     chiban: rec.chiban||'',
@@ -2377,6 +2384,10 @@ function renderLmTable(){
 
   if(sf === 'alert'){
     rows = rows.filter(r => r.status === '要更新' || r.status === '期限切れ');
+  } else if(sf === 'manual'){
+    rows = rows.filter(r => r.manual);
+  } else if(sf === 'auto'){
+    rows = rows.filter(r => !r.manual);
   } else if(sf !== 'all'){
     rows = rows.filter(r => r.status === sf);
   }
@@ -2445,7 +2456,11 @@ function renderLmTable(){
       let v = r[c.key];
       if(c.key==='status'){
         const col = STATUS_COLORS[v] || '#B9B2C9';
-        return `<td><span class="st-pill" style="background:${col};color:${textOn(col)}">${escapeHtml(v)}</span></td>`;
+        // 手動で設定したステータスには ✋ を付け、自動判定の内容も添える
+        const hand = r.manual
+          ? `<span class="manual-mark" title="手動設定（自動判定では「${escapeHtml(r.autoStatus)}」）">✋</span>`
+          : '';
+        return `<td><span class="st-pill" style="background:${col};color:${textOn(col)}">${escapeHtml(v)}</span>${hand}</td>`;
       }
       if(c.key==='usage'){
         const col = USAGE_COLORS[v] || '#B9B2C9';
@@ -2473,7 +2488,7 @@ function renderLmTable(){
 // ===== 集計表 =====
 const GROUP_LABELS = {
   owner:'所有者', karite:'借受者', oazaGroup:'大字', oazaKoaza:'大字・小字',
-  status:'状態', usage:'耕作の状況', law:'適用法', right:'権利の種類',
+  status:'状態', manualLabel:'ステータスの設定方法', usage:'耕作の状況', law:'適用法', right:'権利の種類',
   startWareki:'始期', endWareki:'終期', term:'期間'
 };
 function groupKeyOf(r, key){
@@ -2592,13 +2607,13 @@ document.getElementById('alertBtn').addEventListener('click', () => {
 document.getElementById('sheetExportBtn').addEventListener('click', async () => {
   const rows = Object.entries(managed).map(([fid,rec]) => lmRow(fid, rec));
   rows.sort((a,b)=>cmp(a,b,'chiban'));
-  const header = ['状態','耕作の状況','契約の区分','大字・小字','地番','面積_m2','所有者','所有者住所','所有者TEL','借受者','適用法','始期','終期','期間','権利の種類','借賃区分','10aあたり円','借賃円','メモ'];
+  const header = ['状態','状態の設定','耕作の状況','契約の区分','大字・小字','地番','面積_m2','所有者','所有者住所','所有者TEL','借受者','適用法','始期','終期','期間','権利の種類','借賃区分','10aあたり円','借賃円','メモ'];
   const modeLabel = m => m==='fixed' ? '固定借賃' : '10aあたり';
   const lines = [header.join('\t')];
   Object.entries(managed).sort((a,b)=>cmp(lmRow(a[0],a[1]),lmRow(b[0],b[1]),'chiban')).forEach(([fid,rec]) => {
     const area = (rec.regArea!==''&&rec.regArea!=null) ? rec.regArea : (rec.refArea??'');
     lines.push([
-      statusOf(rec), usageOf(rec), rec.deal||'借りている',
+      statusOf(rec), (rec.status ? '手動設定' : '自動判定'), usageOf(rec), rec.deal||'借りている',
       combinedOazaKoaza(rec.oaza,rec.koaza), rec.chiban||'', area,
       rec.owner||'', rec.ownerAddr||'', rec.ownerTel||'',
       rec.karite||'', rec.law||'', rec.startWareki||'', rec.endWareki||'',
